@@ -1,0 +1,222 @@
+#author: Lee Cai
+#This R code implements stepwise selection
+#the data used is in the same repository
+
+bodyfatData <- read.csv('BodyFatPercentage.csv')
+
+#######Function for partial correlation#######
+
+#function for partial correlation coefficient
+#X and Y are name of the targeted variables in string
+#varlist is a list of variable names in string
+#inds is the input dataset contains all needed data
+#if varlist is not provided, calculate the regular pearson correlation
+
+getPartialCorr <- function(Y,X,varlist=vector(),inds){
+  if (!is.null(varlist)) {
+  ml_dt <- data.frame(cbind(Y=inds[,Y],X=inds[,X],inds[,varlist]))
+  lm1 <- lm(Y ~ . - X , data=ml_dt)
+  res1 <- lm1$residuals
+  lm2 <- lm(X ~ . - Y, data=ml_dt)
+  res2 <- lm2$residuals
+  pcor <- cor(res1,res2) }
+  else {pcor <- cor(inds[,Y],inds[,X])}
+  #print(paste("dependent var: ",Y,"independent var:",X,"accounted variable:",paste(varlist,collapse=','),"P-corr: ",pcor))
+  pcor
+}
+
+#test and compare the partial and regular correlation
+#example of calling the function
+getPartialCorr("ABDOMEN","BODYFAT",c("HIP","CHEST","ANKLE"),bodyfatData)
+cor(bodyfatData$ABDOMEN,bodyfatData$BODYFAT)
+#when the list of accounted variables is empty, getPartialCorr does the same thing as cor
+getPartialCorr(X="ABDOMEN","BODYFAT",inds=bodyfatData)
+
+
+#######function for forward stepwise selection#######
+#depVar is the dependent variable (response variable)
+#varlist is the list of independent variables (predictor variables)
+#inds is the input dataset
+
+#Choose the maximum correlation or partial correlation
+chooseMaxCorr <- function(depVar,varlist,parVarlist=vector(),inds) {
+  if (length(varlist)==1) {
+    X1 <- varlist
+    X1_corr <- ifelse(is.null(parVarlist),getPartialCorr(depVar,varlist[1],inds=inds),getPartialCorr(depVar,varlist[1],parVarlist,inds=inds))
+  }
+  else {
+      X1 <- varlist[1]
+      X1_corr <- ifelse(is.null(parVarlist),getPartialCorr(depVar,varlist[1],inds=inds),getPartialCorr(depVar,varlist[1],parVarlist,inds=inds))
+      for (i in 2:length(varlist)) {
+        X1_corr_temp <- ifelse(is.null(parVarlist),getPartialCorr(depVar,varlist[i],inds=inds),getPartialCorr(depVar,varlist[i],parVarlist,inds=inds))
+        if (abs(X1_corr) < abs(X1_corr_temp)){
+          X1 <- varlist[i]
+          X1_corr <- X1_corr_temp
+        }
+      }
+    }
+  print(paste("The variable of the biggest (partial) correlation is: ",X1,sep=''))
+  print(paste("The (partial) correlation is: ",X1_corr,sep=''))
+  max_corr <- list(X1,X1_corr)
+  max_corr
+}
+
+#function for stepwise forward selection in regression model
+#depVar is the dependent variable (response variable)
+#varlist is the list of independent variables (predictor variables)
+#inds is the input dataset
+#tol is the entry of selection (threshold value)
+
+forwardSelection <- function(depVar,varlist=vector(),inds,tol){
+  if (length(varlist) == 0) {
+    print("variable list to select from must be provided!")
+    return
+  }
+  out <- list(vector(),vector(),vector())
+  parVarlist <- vector()
+  X_ <- chooseMaxCorr(depVar,varlist,inds=inds)
+  X <- X_[[1]]
+  fml <- paste(depVar,"~",X)
+  lmodel <- lm(as.formula(fml),data=inds)
+  pVal <- anova(lmodel)$'Pr(>F)'[1]
+  out[[1]] <- c(out[[1]],X)
+  out[[2]] <- c(out[[2]],pVal)
+  out[[3]] <- c(out[[3]],X_[[2]])
+  while (pVal < tol) {
+    print("The fitted model is:")
+    print(fml)
+    print(summary(lmodel))
+    print(paste("The p-value of the goodness-of-fit test is",pVal,"."))
+    print(paste("Since it's smaller than the significant level",tol,",",X,"is entered into the linear model."))
+    print('----------------------------------------------------------------')
+    parVarlist <- c(parVarlist,X)
+    print(paste("The accounted variable(s) is/are: ",paste(parVarlist,collapse=', ')))
+    varlist <- varlist[!varlist == X]
+    if (length(varlist)==0) {break}
+    X_ <- chooseMaxCorr(depVar,varlist,parVarlist,inds)
+    X <- X_[[1]]
+    fml <- paste(fml,'+',X)
+    lmodel_new <- lm(as.formula(fml),data=inds)
+    pVal <- anova(lmodel,lmodel_new)$'Pr(>F)'[2]
+    lmodel <- lmodel_new
+    out[[1]] <- c(out[[1]],X)
+    out[[2]] <- c(out[[2]],pVal)
+    out[[3]] <- c(out[[3]],X_[[2]])
+  }
+  if (pVal > tol){
+    print("The fitted model is:")
+    print(fml)
+    print(summary(lmodel))
+    print(paste("The p-value of the goodness-of-fit test is",pVal,"."))
+    print(paste("Since it's greater than the significant level",tol,",",X,"is not entered into the linear model."))
+  }
+  names(out) <- c("Variable","p-value","partial_corr")
+  out
+}
+
+#example calling of the forward selection function
+stepforward <- forwardSelection("BODYFAT",c("AGE","WEIGHT","HEIGHT","NECK","CHEST","ABDOMEN","HIP","THIGH","KNEE","ANKLE","BICEPS","FOREARM","WRIST"),bodyfatData,.01)
+stepforward
+
+
+#######function for backward stepwise selection#######
+
+#choose minimum correlation or partial correlation
+#depVar is the dependent variable (response variable)
+#varlist is the list of independent variables (predictor variables)
+#inds is the input dataset
+
+chooseMinCorr <- function(depVar,varlist,inds) {
+  if (length(varlist)==1) {
+    X1 <- varlist
+    X1_corr <- getPartialCorr(depVar,varlist,inds=inds)
+  }
+  else {
+    X1 <- varlist[1]
+    parVarlist <- varlist[-1]
+    X1_corr <- getPartialCorr(depVar,X1,parVarlist,inds=inds)
+    for (i in 2:length(varlist)) {
+      parVarlist <- varlist[-i]
+      X1_corr_temp <- getPartialCorr(depVar,varlist[i],parVarlist,inds=inds)
+      if (abs(X1_corr) > abs(X1_corr_temp)){
+        X1 <- varlist[i]
+        X1_corr <- X1_corr_temp
+      }
+    }
+  }
+  print(paste("The variables that are accounted: ",paste(varlist[!varlist==X1],collapse=', ')))
+  print(paste("The variable of the smallest (partial) correlation is: ",X1,sep=''))
+  print(paste("The (partial) correlation is: ",X1_corr,sep=''))
+  min_corr <- list(X1,X1_corr)
+  min_corr
+}
+
+#function for getting the right formula
+#varlist is the list of independent variables
+#depVar is the dependent variable
+
+getFormula <- function(varlist,depVar){
+  fml_r <- paste(varlist[1])
+  for (i in 2:length(varlist)) {
+    fml_r <- paste(fml_r,'+',varlist[i])
+  }
+  fml <- paste(depVar,"~",fml_r)
+  fml
+}
+ 
+#function for stepwise backward selection in regression model
+backwardSelection <- function(depVar,varlist=vector(),inds,tol){
+  if (length(varlist) == 0) {
+    print("variable list to select from must be provided!")
+    return
+  }
+  out <- list(vector(),vector(),vector())
+  #parVarlist <- vector()
+  X_ <- chooseMinCorr(depVar,varlist,inds=inds)
+  X <- X_[[1]]
+  fml_full <- getFormula(varlist,depVar)
+  lmodel_full <- lm(as.formula(fml_full),data=inds)
+  varlist <- varlist[!varlist == X]
+  fml <- getFormula(varlist,depVar)
+  lmodel <- lm(as.formula(fml),data=inds)
+  pVal <- anova(lmodel,lmodel_full)$'Pr(>F)'[2]
+  out[[1]] <- c(out[[1]],X)
+  out[[2]] <- c(out[[2]],pVal)
+  out[[3]] <- c(out[[3]],X_[[2]])
+  while (pVal > tol) {
+    print("The fitted model is:")
+    print(fml)
+    print(summary(lmodel))
+    print(paste("The p-value of the goodness-of-fit test is",pVal,"."))
+    print(paste("Since it's larger than the significant level",tol,",",X,"is removed from the linear model."))
+    print('----------------------------------------------------------------')
+    X_ <- chooseMinCorr(depVar,varlist,inds=inds)
+    X <- X_[[1]]
+    lmodel_full <- lmodel
+    varlist <- varlist[!varlist == X]
+    if (length(varlist)==0) {
+      pVal <- anova(lmodel)$'Pr(>F)'[1]
+    }
+    else {
+      fml <- getFormula(varlist,depVar)
+      lmodel <- lm(as.formula(fml),data=inds)
+      pVal <- anova(lmodel,lmodel_full)$'Pr(>F)'[2]
+    }
+    out[[1]] <- c(out[[1]],X)
+    out[[2]] <- c(out[[2]],pVal)
+    out[[3]] <- c(out[[3]],X_[[2]])
+  }
+  if (pVal < tol){
+    print("The fitted model is:")
+    print(fml)
+    print(summary(lmodel))
+    print(paste("The p-value of the goodness-of-fit test is",pVal,"."))
+    print(paste("Since it's smaller than the significant level",tol,",",X,"is not removed from the linear model."))
+  }
+  names(out) <- c("Variable","p-value","partial_corr")
+  out
+}
+
+#example calling of the backward selection function
+stepbackward <- backwardSelection("BODYFAT",c("AGE","WEIGHT","HEIGHT","NECK","CHEST","ABDOMEN","HIP","THIGH","KNEE","ANKLE","BICEPS","FOREARM","WRIST"),bodyfatData,0.01)
+stepbackward
