@@ -1,6 +1,7 @@
 #author: Lee Cai
 #This R code implements stepwise selection
-#the data used is in the same repository
+#the data used is in a comma delimited file with each row as a case and each column as 
+#variable. It's only shown as an example of the function calling here.
 
 bodyfatData <- read.csv('BodyFatPercentage.csv')
 
